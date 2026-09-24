@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LocalTube — YouTube-style local player</title>
+<style>
+:root{
+  --bg:#0f0f0f;
+  --surface:#181818;
+  --surface-2:#212121;
+  --surface-3:#2b2b2b;
+  --text:#f1f1f1;
+  --muted:#aaa;
+  --line:#303030;
+  --accent:#ff0033;
+  --shadow:0 16px 50px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box}
+html{height:100%;scrollbar-color:#505050 #0f0f0f;scrollbar-width:auto}
+body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+button,input{font:inherit}button{color:inherit}
+*::-webkit-scrollbar{width:12px;height:12px}
+*::-webkit-scrollbar-track{background:#0f0f0f}
+*::-webkit-scrollbar-thumb{background:#4d4d4d;border:3px solid #0f0f0f;border-radius:999px}
+*::-webkit-scrollbar-thumb:hover{background:#696969}
+
+.app{height:100vh;display:grid;grid-template-rows:56px 1fr}
+header{display:flex;align-items:center;gap:16px;padding:0 18px;background:#0f0f0f;border-bottom:1px solid #222;z-index:50}
+.brand{display:flex;align-items:center;gap:9px;white-space:nowrap;user-select:none}
+.logo{width:31px;height:22px;border-radius:7px;background:var(--accent);position:relative;display:grid;place-items:center;box-shadow:0 0 20px rgba(255,0,51,.12)}
+.logo:after{content:"";width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #fff;margin-left:2px}
+.brand-name{font-size:19px;font-weight:800;letter-spacing:-.3px}.badge{border:1px solid #333;color:#aaa;font-size:11px;border-radius:999px;padding:3px 7px}
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:6px}.ghost{border:0;background:transparent;border-radius:22px;padding:8px 12px;cursor:pointer;transition:background .15s}.ghost:hover{background:#272727}.round{width:38px;height:38px;padding:0;display:grid;place-items:center}
+
+.layout{min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 360px}
+.main{min-width:0;overflow:auto;padding:18px 22px 40px}
+.player-wrap{max-width:1320px;margin:0 auto}
+.video-shell{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;box-shadow:0 10px 35px rgba(0,0,0,.35);user-select:none}
+.video-shell.audio-only{background:radial-gradient(circle at 50% 45%,#2a2a2a 0,#0b0b0b 62%)}
+video{width:100%;height:100%;display:block;background:#000;object-fit:contain;cursor:pointer;transition:filter .3s ease,transform .3s ease}
+.video-shell.music-mode video{filter:blur(7px) brightness(.43);transform:scale(1.015)}
+.audio-art{position:absolute;inset:0;display:none;place-items:center;pointer-events:none;background:radial-gradient(circle at center,#242424 0,#0b0b0b 72%)}
+.video-shell.audio-only .audio-art{display:grid}
+.audio-art .big-disc{width:min(42%,310px);aspect-ratio:1;border-radius:50%;background:repeating-radial-gradient(circle,#111 0 2px,#202020 3px 4px);box-shadow:0 14px 60px rgba(0,0,0,.7);display:grid;place-items:center;position:relative;animation:spin 7s linear infinite;animation-play-state:paused}
+.video-shell.audio-only.playing .audio-art .big-disc{animation-play-state:running}
+.big-disc:before{content:"";position:absolute;inset:10%;border-radius:50%;background:radial-gradient(circle,#5b5b5b 0,#242424 58%,#161616 100%);opacity:.6}
+.big-disc:after{content:"LT";position:absolute;width:22%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:#d9d9d9;color:#111;font-size:13px;font-weight:800;box-shadow:0 0 0 7px rgba(255,255,255,.05)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.empty-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:radial-gradient(circle at center,#1d1d1d 0,#080808 72%);pointer-events:none;z-index:2}.empty-icon{font-size:46px}.empty-state h2{margin:0;font-size:20px}.empty-state p{margin:0;color:#aaa;max-width:500px;text-align:center;font-size:14px;line-height:1.5}
+
+.video-title-overlay{position:absolute;left:16px;top:15px;max-width:70%;color:#fff;font-size:14px;font-weight:600;text-shadow:0 2px 5px #000;opacity:0;pointer-events:none;transition:opacity .18s;z-index:5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.video-shell.show-title .video-title-overlay{opacity:.96}
+
+.controls{position:absolute;left:0;right:0;bottom:0;padding:0 13px 10px;background:linear-gradient(transparent,rgba(0,0,0,.1) 4%,rgba(0,0,0,.88) 72%,rgba(0,0,0,.96));transition:opacity .16s ease;opacity:1;z-index:10}
+.video-shell.ui-hidden .controls{opacity:0;pointer-events:none}
+.video-shell.ui-hidden .video-title-overlay{opacity:0}
+.progress-row{height:20px;display:flex;align-items:center;cursor:pointer;touch-action:none}.progress-track{width:100%;height:4px;border-radius:999px;background:rgba(255,255,255,.34);position:relative;transition:height .12s}.progress-row:hover .progress-track,.progress-row.dragging .progress-track{height:6px}
+.progress-buffer,.progress-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px}.progress-buffer{width:0;background:rgba(255,255,255,.35)}.progress-fill{width:0;background:var(--accent)}
+.progress-knob{position:absolute;left:0;top:50%;width:13px;height:13px;border-radius:50%;background:var(--accent);transform:translate(-50%,-50%) scale(0);transition:transform .1s}.progress-row:hover .progress-knob,.progress-row.dragging .progress-knob{transform:translate(-50%,-50%) scale(1)}
+.control-row{display:flex;align-items:center;gap:1px}.ctrl{width:39px;height:36px;border:0;background:transparent;border-radius:6px;display:grid;place-items:center;cursor:pointer;font-size:18px;transition:background .12s,transform .08s}.ctrl:hover{background:rgba(255,255,255,.12)}.ctrl:active{transform:scale(.94)}.ctrl svg{width:21px;height:21px;fill:currentColor;stroke:currentColor;stroke-width:0}.ctrl.small svg{width:20px;height:20px}.time{font-size:13px;white-space:nowrap;color:#f4f4f4;margin-left:7px;min-width:92px}.spacer{flex:1}
+.volume{display:flex;align-items:center;gap:3px;min-width:0}.vol-range{width:82px;accent-color:var(--accent);cursor:pointer}
+.center-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.88);width:72px;height:72px;border:0;border-radius:50%;background:rgba(0,0,0,.56);backdrop-filter:blur(5px);display:grid;place-items:center;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;z-index:12}.center-play.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}.center-play svg{width:28px;height:28px}
+.gesture{position:absolute;top:50%;width:76px;height:76px;border-radius:50%;background:rgba(0,0,0,.66);display:grid;place-items:center;opacity:0;transform:translateY(-50%) scale(.86);pointer-events:none;transition:opacity .15s,transform .15s;z-index:14}.gesture.show{opacity:1;transform:translateY(-50%) scale(1)}.gesture.left{left:15%}.gesture.right{right:15%}.gesture-inner{display:flex;align-items:center;gap:4px;font-size:12px}.gesture svg{width:25px;height:25px}
+.volume-hud{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.9);background:rgba(0,0,0,.73);backdrop-filter:blur(6px);padding:11px 15px;border-radius:10px;display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .13s,transform .13s;z-index:15}.volume-hud.show{opacity:1;transform:translate(-50%,-50%) scale(1)}.volume-hud svg{width:20px;height:20px}
+.music-disc{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%) scale(.92);width:min(31%,250px);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:repeating-radial-gradient(circle,#080808 0 2px,#202020 3px 4px);box-shadow:0 20px 70px rgba(0,0,0,.75);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:4}.music-disc:before{content:"";position:absolute;inset:11%;border-radius:50%;background:radial-gradient(circle,#444,#1a1a1a 65%,#101010);opacity:.7}.music-disc:after{content:"♪";position:absolute;width:26%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:#eee;color:#111;font-size:16px;font-weight:800;box-shadow:0 0 0 8px rgba(255,255,255,.045)}.video-shell.music-mode .music-disc{opacity:1;transform:translate(-50%,-50%) scale(1);animation:spinDisc 8s linear infinite}@keyframes spinDisc{to{transform:translate(-50%,-50%) rotate(360deg)}}
+
+.popup{position:fixed;z-index:80;display:none;min-width:280px;max-width:min(360px,calc(100vw - 18px));background:#242424;border:1px solid #3a3a3a;border-radius:9px;box-shadow:var(--shadow);overflow:hidden}.popup.show{display:block}.popup-head{padding:12px 14px;border-bottom:1px solid #393939;font-size:14px;font-weight:700}.popup-body{padding:7px}.popup-item{width:100%;border:0;background:transparent;border-radius:6px;padding:10px 11px;display:flex;align-items:center;justify-content:space-between;text-align:left;cursor:pointer;font-size:13px;transition:background .11s}.popup-item:hover{background:#333}.popup-item .sub{color:#aaa;font-size:12px}.popup-item.active:after{content:'✓';font-weight:700;margin-left:12px}.divider{height:1px;background:#383838;margin:5px 0}.settings-popup{min-width:305px}.setting-row{padding:11px;display:flex;align-items:center;justify-content:space-between;gap:15px;font-size:13px}.setting-row small{display:block;color:#969696;margin-top:2px;line-height:1.35}.switch{position:relative;width:40px;height:22px;background:#4b4b4b;border:0;border-radius:999px;cursor:pointer;flex:0 0 auto}.switch:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#ddd;transition:.16s}.switch.on{background:var(--accent)}.switch.on:after{left:21px;background:#fff}
+.submenu-panel{min-width:300px}.back-row{justify-content:flex-start!important;gap:8px}.back-row .submenu-title{flex:1;text-align:center;font-weight:700}.quality-note{padding:9px 11px 12px;color:#999;font-size:11px;line-height:1.5}.track-item-left{display:flex;align-items:center;gap:8px}.track-dot{width:7px;height:7px;border-radius:50%;background:#777}.track-dot.on{background:var(--accent);box-shadow:0 0 0 3px rgba(255,0,51,.12)}.track-scan{display:flex;align-items:center;gap:8px;padding:9px 11px;color:#aaa;font-size:11px;line-height:1.45;background:#1d1d1d;border-radius:7px;margin-bottom:4px}.track-scan .scan-dot{width:7px;height:7px;border-radius:50%;background:#777;animation:pulseScan 1.1s ease-in-out infinite}.track-scan.ready .scan-dot{background:#4caf50;animation:none}.track-scan.warn .scan-dot{background:#e0a84b;animation:none}@keyframes pulseScan{50%{opacity:.35;transform:scale(.78)}}#alternateAudio{display:none}.popup-item .track-tech{color:#888;font-size:11px;margin-left:10px;white-space:nowrap}.popup-item.track-loading{opacity:.6;pointer-events:none}.popup-item.track-active{background:#2e2e2e}.track-empty{padding:10px 11px;color:#999;font-size:12px;line-height:1.5}
+
+.side{min-height:0;border-left:1px solid #252525;background:#111;display:flex;flex-direction:column;transition:width .18s}.side.collapsed{display:none}.side-head{padding:14px 14px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #242424}.side-head strong{font-size:15px}.count{font-size:12px;color:#999}.drop{margin:12px;border:1px dashed #454545;border-radius:10px;padding:14px;text-align:center;color:#999;cursor:pointer;transition:background .12s,border-color .12s}.drop:hover{border-color:#777;background:#181818}.drop b{display:block;color:#ddd;font-size:13px;margin-bottom:4px}#fileInput,#captionFileInput{display:none}
+.playlist{min-height:0;overflow:auto;padding:0 8px 14px}.item{display:grid;grid-template-columns:24px 110px minmax(0,1fr) 30px;gap:8px;padding:8px;border-radius:8px;align-items:center;cursor:pointer;transition:background .11s,opacity .15s,transform .15s}.item:hover{background:#202020}.item.active{background:#282828}.item.dragging{opacity:.35}.item.drop-target{outline:1px dashed #666;outline-offset:-2px}.drag-handle{width:24px;height:34px;display:grid;place-items:center;color:#666;font-size:16px;cursor:grab}.drag-handle:active{cursor:grabbing}.thumb{width:110px;height:62px;background:#252525;border-radius:6px;overflow:hidden;position:relative;display:grid;place-items:center;color:#888}.thumb video{width:100%;height:100%;object-fit:cover;pointer-events:none}.thumb.audio{background:radial-gradient(circle,#303030,#121212)}.thumb.audio .mini-disc{width:34px;aspect-ratio:1;border-radius:50%;background:repeating-radial-gradient(circle,#0a0a0a 0 2px,#242424 3px 4px);box-shadow:0 5px 20px #000;position:relative}.thumb.audio .mini-disc:after{content:"";position:absolute;inset:25%;border-radius:50%;background:#eee}.num{position:absolute;left:5px;bottom:5px;background:rgba(0,0,0,.74);padding:2px 4px;border-radius:3px;font-size:10px}.item-info{min-width:0}.item-title{font-size:13px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.item-meta{margin-top:5px;color:#999;font-size:11px}.remove{width:29px;height:29px;border:0;background:transparent;border-radius:50%;cursor:pointer;color:#888;font-size:18px}.remove:hover{background:#333;color:#fff}
+
+.video-title{font-size:21px;font-weight:700;margin:15px 0 8px;line-height:1.3;overflow-wrap:anywhere}.meta{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#aaa;border-bottom:1px solid #262626;padding-bottom:14px}.chips{display:flex;gap:8px;flex-wrap:wrap}.chip{font-size:12px;background:#212121;padding:7px 10px;border-radius:16px;color:#ccc}.hint{font-size:12px}.below-actions{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap}.below-btn{border:0;background:#212121;color:#eee;padding:9px 12px;border-radius:18px;cursor:pointer;font-size:12px;transition:background .12s}.below-btn:hover{background:#303030}.below-btn.active{background:#f1f1f1;color:#111}
+
+.toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,10px);background:#272727;color:#fff;padding:11px 15px;border-radius:7px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:120;box-shadow:0 10px 30px rgba(0,0,0,.4)}.toast.show{opacity:1;transform:translate(-50%,0)}
+.drop-overlay{position:fixed;inset:56px 0 0;background:rgba(0,0,0,.76);display:none;place-items:center;z-index:100;pointer-events:none}.drop-overlay.show{display:grid}.drop-card{border:2px dashed #888;border-radius:18px;padding:36px 56px;text-align:center;background:#171717}.drop-card b{font-size:20px}.drop-card div{margin-top:8px;color:#aaa}
+.mini-player{position:fixed;right:22px;bottom:22px;width:360px;aspect-ratio:16/9;background:#000;border:1px solid #444;border-radius:9px;display:none;z-index:115;box-shadow:0 14px 40px rgba(0,0,0,.65);overflow:hidden}.mini-player.show{display:block}.mini-player video{pointer-events:none}.mini-close{position:absolute;right:6px;top:6px;width:29px;height:29px;border:0;border-radius:50%;background:rgba(0,0,0,.62);cursor:pointer;z-index:3}.mini-close:hover{background:#000}
+
+@media(max-width:980px){body{overflow:auto}.app{height:auto;min-height:100vh}.layout{grid-template-columns:1fr}.side{border-left:0;border-top:1px solid #262626;min-height:340px}.main{padding:12px}.hint{display:none}}
+@media(max-width:620px){.badge{display:none}header{padding:0 10px}.main{padding:8px}.video-shell{border-radius:7px}.volume .vol-range{display:none}.ctrl{width:34px}.time{min-width:82px}.mini-player{width:270px;right:10px;bottom:10px}.item{grid-template-columns:22px 92px minmax(0,1fr) 28px}.thumb{width:92px;height:52px}.music-disc{width:44%}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand"><div class="logo"></div><span class="brand-name">LocalTube</span><span class="badge">100% local</span></div>
+  <div class="header-actions">
+    <button class="ghost round" id="playlistToggle" title="Toggle playlist" aria-label="Toggle playlist">
+      <svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+    </button>
+    <button class="ghost" id="addBtn">＋ Add media</button>
+  </div>
+</header>
+
+<div class="layout">
+<main class="main">
+<div class="player-wrap">
+  <div class="video-shell" id="videoShell">
+    <video id="video" playsinline preload="metadata"></video><audio id="alternateAudio" preload="auto"></audio>
+    <div class="audio-art"><div class="big-disc"></div></div>
+    <div class="empty-state" id="emptyState"><div class="empty-icon">▶</div><h2>Your local media player</h2><p>Load videos or audio and use a YouTube-style player. Files never leave this browser.</p></div>
+    <div class="video-title-overlay" id="videoTitleOverlay"></div>
+    <div class="music-disc" aria-hidden="true"></div>
+    <button class="center-play" id="centerPlay" aria-label="Play"></button>
+    <div class="gesture left" id="gestureLeft"><div class="gesture-inner"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 7l-5 5 5 5v-3c3.3 0 5.7.9 7.5 2.8-.7-3.5-3.2-6.8-7.5-7.7z"/></svg><b>10</b></div></div>
+    <div class="gesture right" id="gestureRight"><div class="gesture-inner"><b>10</b><svg viewBox="0 0 24 24"><path fill="currentColor" d="M13 7l5 5-5 5v-3c-3.3 0-5.7.9-7.5 2.8.7-3.5 3.2-6.8 7.5-7.7z"/></svg></div></div>
+    <div class="volume-hud" id="volumeHud"><span id="volumeHudIcon"></span><span id="volumeHudText">100%</span></div>
+
+    <div class="controls" id="controls">
+      <div class="progress-row" id="progressRow"><div class="progress-track" id="progressTrack"><div class="progress-buffer" id="progressBuffer"></div><div class="progress-fill" id="progressFill"></div><div class="progress-knob" id="progressKnob"></div></div></div>
+      <div class="control-row">
+        <button class="ctrl" id="playBtn" title="Play / Pause (Space or K)" aria-label="Play / Pause"></button>
+        <button class="ctrl small" id="backBtn" title="Back 10 seconds (J)" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 8V5l-5 5 5 5v-3c2.8 0 4.8.8 6.4 2.6C16.8 11.2 14.5 9.1 11 8zm-6 9h2v2H5v-2zm3 0h2v2H8v-2zm3 0h2v2h-2v-2zm3 0h2v2h-2v-2z"/></svg></button>
+        <button class="ctrl small" id="forwardBtn" title="Forward 10 seconds (L)" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M13 8c-3.5 1.1-5.8 3.2-6.4 6.6C8.2 12.8 10.2 12 13 12V15l5-5-5-5v3z"/></svg></button>
+        <div class="volume"><button class="ctrl small" id="muteBtn" title="Mute (M)" aria-label="Mute"></button><input class="vol-range" id="volumeRange" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume"></div>
+        <div class="time" id="time">0:00 / 0:00</div>
+        <div class="spacer"></div>
+        <button class="ctrl small" id="audioBtn" title="Audio tracks" aria-label="Audio tracks"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 5v14h2V5h-2zM5 9v6h2V9H5zm12 0v6h2V9h-2zM2 11v2h2v-2H2zm20 0h-2v2h2v-2z"/></svg></button>
+        <button class="ctrl small" id="captionsBtn" title="Captions" aria-label="Captions"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm2 5h3c.7 0 1.4.3 1.8.8l-1.2 1.2c-.2-.2-.5-.3-.8-.3H6v1.6h2.8c.3 0 .6-.1.8-.3l1.2 1.2c-.4.5-1.1.8-1.8.8H6a2 2 0 0 1-2-2v-1c0-1.1.9-2 2-2zm8 0h3c.7 0 1.4.3 1.8.8l-1.2 1.2c-.2-.2-.5-.3-.8-.3H14v1.6h2.8c.3 0 .6-.1.8-.3l1.2 1.2c-.4.5-1.1.8-1.8.8H14a2 2 0 0 1-2-2v-1c0-1.1.9-2 2-2z"/></svg></button>
+        <button class="ctrl small" id="settingsBtn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.5-2-3.4-2.3.9a7.8 7.8 0 0 0-1.7-1L15 3h-4l-.4 3a7.8 7.8 0 0 0-1.7 1L6.6 6.1l-2 3.4L6.6 11a7.8 7.8 0 0 0 0 2l-2 1.5 2 3.4 2.3-.9a7.8 7.8 0 0 0 1.7 1l.4 3h4l.4-3a7.8 7.8 0 0 0 1.7-1l2.3.9 2-3.4-2-1.5zM13 15.8A3.8 3.8 0 1 1 13 8a3.8 3.8 0 0 1 0 7.8z"/></svg></button>
+        <button class="ctrl small" id="theaterBtn" title="Theater mode" aria-label="Theater mode"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 7h16v10H4zM2 5h20v14H2V5zm2 2v10h16V7H4z"/></svg></button>
+        <button class="ctrl small" id="pipBtn" title="Picture-in-picture" aria-label="Picture-in-picture"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 12H5V7h14v10zm-1-1h-6v-4h6v4z"/></svg></button>
+        <button class="ctrl small" id="fullscreenBtn" title="Fullscreen (F)" aria-label="Fullscreen"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M7 4H4v3h2V6h1V4zm10 0v2h1v1h2V4h-3zM6 17H4v3h3v-2H6v-1zm12 0v1h-1v2h3v-3h-2z"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="video-title" id="videoTitle">No media loaded</div>
+  <div class="meta"><div class="chips"><span class="chip">Local playback</span><span class="chip">No upload</span><span class="chip">YouTube-style UI</span></div><div class="hint">Space/K play · J/L seek · wheel volume with right mouse</div></div>
+  <div class="below-actions">
+    <button class="below-btn" id="musicModeBtn">♫ Music mode</button>
+    <button class="below-btn" id="detailsBtn">ⓘ Details</button>
+    <button class="below-btn" id="shortcutsBtn">⌨ Shortcuts</button>
+    <button class="below-btn" id="clearBtn">🗑 Clear playlist</button>
+  </div>
+</div>
+</main>
+
+<aside class="side" id="sidebar">
+  <div class="side-head"><strong>Playlist</strong><span class="count" id="count">0 items</span></div>
+  <div class="drop" id="dropZone"><b>Drop videos or audio here</b>or click to choose media</div>
+  <input id="fileInput" type="file" accept="video/*,audio/*" multiple>
+  <input id="captionFileInput" type="file" accept=".vtt,.srt,text/vtt,application/x-subrip">
+  <div class="playlist" id="playlist"></div>
+</aside>
+</div>
+</div>
+
+<div class="popup settings-popup" id="settingsPopup"><div class="popup-head">Settings</div><div class="popup-body">
+  <button class="popup-item" id="speedItem"><span>Playback speed</span><span class="sub" id="speedValue">Normal</span></button>
+  <button class="popup-item" id="qualityItem"><span>Quality</span><span class="sub">Original file</span></button>
+  <div class="divider"></div>
+  <div class="setting-row"><div>Loop video<small>Repeat the current item</small></div><button class="switch" id="loopSwitch" aria-label="Loop video"></button></div>
+</div></div>
+
+<div class="popup submenu-panel" id="speedPopup"><div class="popup-body"><button class="popup-item back-row" id="speedBack"><span>‹</span><span class="submenu-title">Playback speed</span><span></span></button><div class="divider"></div>
+  <button class="popup-item speed-choice" data-speed="0.5">0.5×</button><button class="popup-item speed-choice" data-speed="0.75">0.75×</button><button class="popup-item speed-choice active" data-speed="1">Normal</button><button class="popup-item speed-choice" data-speed="1.25">1.25×</button><button class="popup-item speed-choice" data-speed="1.5">1.5×</button><button class="popup-item speed-choice" data-speed="1.75">1.75×</button><button class="popup-item speed-choice" data-speed="2">2×</button>
+</div></div>
+
+<div class="popup submenu-panel" id="qualityPopup"><div class="popup-body"><button class="popup-item back-row" id="qualityBack"><span>‹</span><span class="submenu-title">Quality</span><span></span></button><div class="divider"></div><div class="quality-note">A local browser player cannot generate alternate resolutions. Playback uses the quality encoded in your file.</div></div></div>
+
+<div class="popup submenu-panel" id="audioPopup"><div class="popup-body"><div class="popup-head" style="margin:-7px -7px 5px">Audio tracks</div><div id="audioTracksBody"></div><div class="quality-note" id="audioSupportNote"></div></div></div>
+<div class="popup submenu-panel" id="captionsPopup"><div class="popup-body"><div class="popup-head" style="margin:-7px -7px 5px">Captions</div><div id="captionTracksBody"></div><div class="divider"></div><button class="popup-item" id="addCaptionBtn"><span>Add local subtitle file</span><span class="sub">VTT / SRT</span></button><div class="quality-note" id="captionSupportNote"></div></div></div>
+
+<div class="popup" id="detailsPopup"><div class="popup-head">Media details</div><div class="popup-body" id="detailsBody"><div class="quality-note">No media loaded.</div></div></div>
+<div class="popup" id="shortcutsPopup"><div class="popup-head">Keyboard shortcuts</div><div class="popup-body"><button class="popup-item"><span>Space / K</span><span class="sub">Play / pause</span></button><button class="popup-item"><span>J / ←</span><span class="sub">Back 10 / 5 sec</span></button><button class="popup-item"><span>L / →</span><span class="sub">Forward 10 / 5 sec</span></button><button class="popup-item"><span>M</span><span class="sub">Mute</span></button><button class="popup-item"><span>F</span><span class="sub">Fullscreen</span></button><button class="popup-item"><span>P</span><span class="sub">Picture-in-picture</span></button><button class="popup-item"><span>N / B</span><span class="sub">Next / previous</span></button><button class="popup-item"><span>↑ / ↓</span><span class="sub">Volume</span></button><button class="popup-item"><span>&lt; / &gt;</span><span class="sub">Playback speed</span></button></div></div>
+
+<div class="toast" id="toast"></div>
+<div class="drop-overlay" id="dropOverlay"><div class="drop-card"><b>Drop media to add it</b><div>Your files remain local to this browser.</div></div></div>
+<div class="mini-player" id="miniPlayer"><button class="mini-close" id="miniClose">×</button><video id="miniVideo" muted playsinline></video></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const video = $('#video');
+  const alternateAudio = $('#alternateAudio');
+  const videoShell = $('#videoShell');
+  const emptyState = $('#emptyState');
+  const playlistEl = $('#playlist');
+  const countEl = $('#count');
+  const videoTitle = $('#videoTitle');
+  const overlayTitle = $('#videoTitleOverlay');
+  const fileInput = $('#fileInput');
+  const captionFileInput = $('#captionFileInput');
+  const dropZone = $('#dropZone');
+  const addBtn = $('#addBtn');
+  const playBtn = $('#playBtn');
+  const centerPlay = $('#centerPlay');
+  const muteBtn = $('#muteBtn');
+  const volumeRange = $('#volumeRange');
+  const timeEl = $('#time');
+  const progressTrack = $('#progressTrack');
+  const progressRow = $('#progressRow');
+  const progressFill = $('#progressFill');
+  const progressBuffer = $('#progressBuffer');
+  const progressKnob = $('#progressKnob');
+  const settingsBtn = $('#settingsBtn');
+  const settingsPopup = $('#settingsPopup');
+  const speedPopup = $('#speedPopup');
+  const qualityPopup = $('#qualityPopup');
+  const audioBtn = $('#audioBtn');
+  const audioPopup = $('#audioPopup');
+  const captionsBtn = $('#captionsBtn');
+  const captionsPopup = $('#captionsPopup');
+  const audioTracksBody = $('#audioTracksBody');
+  const captionTracksBody = $('#captionTracksBody');
+  const captionFileHint = $('#captionSupportNote');
+  const audioSupportNote = $('#audioSupportNote');
+  const toastEl = $('#toast');
+  const dropOverlay = $('#dropOverlay');
+  const gestureLeft = $('#gestureLeft');
+  const gestureRight = $('#gestureRight');
+  const volumeHud = $('#volumeHud');
+  const volumeHudText = $('#volumeHudText');
+  const volumeHudIcon = $('#volumeHudIcon');
+  const sidebar = $('#sidebar');
+  const miniPlayer = $('#miniPlayer');
+  const miniVideo = $('#miniVideo');
+  const musicModeBtn = $('#musicModeBtn');
+
+  let items = [];
+  let progressRAF = 0;
+  let currentIndex = -1;
+  let isProgressDragging = false;
+  let uiTimer = null;
+  let toastTimer = null;
+  let gestureTimer = null;
+  let volumeTimer = null;
+  let rightMouseHeld = false;
+  let rightWheelBlockTimer = null;
+  let loop = false;
+  let savedVolume = 1;
+  let dragIndex = -1;
+  let miniMode = false;
+  let mediaEnterTime = 0;
+  let sidecarTracks = [];
+  let generatedCaptionUrls = [];
+  let alternateAudioUrl = '';
+  let alternateAudioIndex = -1;
+  let alternateAudioActive = false;
+  let masterVolume = 1;
+  let masterMuted = false;
+  let trackInfo = null;
+  let trackProbeKey = '';
+  let trackProbeToken = 0;
+  let ffmpegInstance = null;
+  let ffmpegLoading = null;
+  let fetchFileFn = null;
+
+  const ICON = {
+    play:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>',
+    pause:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>',
+    volume:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm11.4 3a3.5 3.5 0 0 0-1.7-3v6a3.5 3.5 0 0 0 1.7-3zm.1-7.7v2.2A7 7 0 0 1 18 12a7 7 0 0 1-3.5 6.5v2.2A9 9 0 0 0 20 12a9 9 0 0 0-5.5-7.7z"/></svg>',
+    volumeLow:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm11.2-.7v2a3 3 0 0 1 0 3.4v2a5 5 0 0 0 0-7.4z"/></svg>',
+    mute:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm14.4 3 2.3-2.3-1.4-1.4L16 10.6l-2.3-2.3-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3z"/></svg>',
+    volumeHud:'<svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm11.3-.9v1.8a3 3 0 0 1 0 4.2v1.8a4.8 4.8 0 0 0 0-7.8z"/></svg>'
+  };
+
+  function formatTime(sec){
+    if(!Number.isFinite(sec)) return '0:00';
+    sec=Math.max(0,Math.floor(sec));
+    const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+    return h ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+  }
+  function escaped(value){const d=document.createElement('div');d.textContent=value;return d.innerHTML}
+  function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.classList.remove('show'),1700)}
+  function updateCount(){countEl.textContent=`${items.length} item${items.length===1?'':'s'}`}
+  function isAudio(fileOrItem){return (fileOrItem.type||'').startsWith('audio/')}
+  function prettySize(bytes){if(!bytes)return 'Unknown';const units=['B','KB','MB','GB'];let n=bytes,i=0;while(n>=1024&&i<units.length-1){n/=1024;i++}return `${n.toFixed(i?1:0)} ${units[i]}`}
+
+  function setPlayIcon(){playBtn.innerHTML=video.paused?ICON.play:ICON.pause;centerPlay.innerHTML=ICON.play;updateAudioVisualState()}
+  function updateMuteIcon(){const muted=masterMuted||masterVolume===0;muteBtn.innerHTML=muted?ICON.mute:(masterVolume<.5?ICON.volumeLow:ICON.volume);volumeHudIcon.innerHTML=muted?ICON.mute:ICON.volumeHud}
+  function updateAudioVisualState(){videoShell.classList.toggle('playing',!!video.src&&!video.paused)}
+  function updateProgress(){
+    const d=video.duration||0,c=video.currentTime||0,p=d?(c/d)*100:0;
+    progressFill.style.width=`${p}%`;progressKnob.style.left=`${p}%`;timeEl.textContent=`${formatTime(c)} / ${formatTime(d)}`;
+    if(video.buffered.length&&d){try{progressBuffer.style.width=`${Math.min(100,(video.buffered.end(video.buffered.length-1)/d)*100)}%`}catch{}}
+  }
+  function updateUI(force=false){
+    videoShell.classList.remove('ui-hidden');
+    if(force) videoShell.classList.add('show-title');
+    clearTimeout(uiTimer);
+    if(!video.paused){
+      uiTimer=setTimeout(()=>{videoShell.classList.add('ui-hidden');videoShell.classList.remove('show-title')},2600);
+    } else {
+      videoShell.classList.add('show-title');
+    }
+  }
+  function showGesture(side){const el=side==='left'?gestureLeft:gestureRight;el.classList.add('show');clearTimeout(gestureTimer);gestureTimer=setTimeout(()=>el.classList.remove('show'),430)}
+  function showVolumeHud(){volumeHudText.textContent=`${Math.round(masterVolume*100)}%`;volumeHudIcon.innerHTML=masterMuted||masterVolume===0?ICON.mute:ICON.volumeHud;volumeHud.classList.add('show');clearTimeout(volumeTimer);volumeTimer=setTimeout(()=>volumeHud.classList.remove('show'),650)}
+
+  function addFiles(fileList){
+    const files=[...fileList].filter(f=>f.type.startsWith('video/')||f.type.startsWith('audio/'));
+    if(!files.length){toast('No supported video or audio files found');return}
+    for(const file of files){
+      items.push({id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(16).slice(2)}`,name:file.name,file,url:URL.createObjectURL(file),duration:0,size:file.size,type:file.type,kind:isAudio(file)?'audio':'video',trackInfo:null});
+    }
+    renderPlaylist();
+    if(currentIndex===-1) loadIndex(0,false);
+    toast(`${files.length} ${files.length===1?'item':'items'} added`);
+  }
+
+  function renderPlaylist(){
+    playlistEl.innerHTML='';
+    items.forEach((item,index)=>{
+      const row=document.createElement('div');row.className=`item${index===currentIndex?' active':''}`;row.draggable=true;row.dataset.index=String(index);
+      const handle=document.createElement('div');handle.className='drag-handle';handle.textContent='⋮⋮';handle.title='Drag to reorder';
+      const thumb=document.createElement('div');thumb.className=`thumb${item.kind==='audio'?' audio':''}`;
+      if(item.kind==='audio'){
+        const disc=document.createElement('div');disc.className='mini-disc';thumb.appendChild(disc);
+      }else{
+        const tv=document.createElement('video');tv.src=item.url;tv.muted=true;tv.preload='metadata';tv.playsInline=true;thumb.appendChild(tv);
+      }
+      const num=document.createElement('span');num.className='num';num.textContent=String(index+1);thumb.appendChild(num);
+      const info=document.createElement('div');info.className='item-info';
+      const title=document.createElement('div');title.className='item-title';title.textContent=item.name;
+      const meta=document.createElement('div');meta.className='item-meta';meta.textContent=item.duration?formatTime(item.duration):(item.kind==='audio'?'Local audio':'Local video');
+      info.append(title,meta);
+      const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title='Remove';remove.setAttribute('aria-label','Remove');remove.onclick=e=>{e.stopPropagation();removeItem(index)};
+      row.append(handle,thumb,info,remove);row.addEventListener('click',()=>loadIndex(index,true));
+      row.addEventListener('dragstart',e=>{dragIndex=index;row.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',String(index))});
+      row.addEventListener('dragend',()=>{dragIndex=-1;playlistEl.querySelectorAll('.item').forEach(x=>x.classList.remove('dragging','drop-target'))});
+      row.addEventListener('dragover',e=>{e.preventDefault();if(dragIndex<0||dragIndex===index)return;playlistEl.querySelectorAll('.item').forEach(x=>x.classList.remove('drop-target'));row.classList.add('drop-target');e.dataTransfer.dropEffect='move'});
+      row.addEventListener('drop',e=>{e.preventDefault();const from=dragIndex;if(from<0||from===index)return;moveItem(from,index);dragIndex=-1});
+      playlistEl.appendChild(row);
+    });
+    updateCount();
+  }
+
+  function moveItem(from,to){
+    if(from<0||to<0||from>=items.length||to>=items.length||from===to)return;
+    const [moved]=items.splice(from,1);items.splice(to,0,moved);
+    if(currentIndex===from) currentIndex=to;
+    else if(from<currentIndex&&to>=currentIndex) currentIndex--;
+    else if(from>currentIndex&&to<=currentIndex) currentIndex++;
+    renderPlaylist();
+    toast('Playlist order updated');
+  }
+
+  function removeItem(index){
+    if(!items[index])return;
+    const wasCurrent=index===currentIndex;
+    const old=items[index];URL.revokeObjectURL(old.url);items.splice(index,1);
+    if(!items.length){currentIndex=-1;clearMedia();}
+    else if(wasCurrent){currentIndex=Math.min(index,items.length-1);loadIndex(currentIndex,false)}
+    else if(index<currentIndex)currentIndex--;
+    renderPlaylist();
+  }
+  function clearPlaylist(){if(!items.length){toast('Playlist is already empty');return}items.forEach(i=>URL.revokeObjectURL(i.url));items=[];currentIndex=-1;clearMedia();renderPlaylist();toast('Playlist cleared')}
+
+  function clearMedia(){
+    video.pause();video.removeAttribute('src');video.load();emptyState.style.display='flex';videoTitle.textContent='No media loaded';overlayTitle.textContent='';videoShell.classList.remove('audio-only','music-mode','playing');progressFill.style.width='0%';progressKnob.style.left='0%';progressBuffer.style.width='0%';timeEl.textContent='0:00 / 0:00';clearSidecarTracks();refreshTrackMenus();setPlayIcon();
+  }
+
+  function revokeGeneratedTrackUrls(){
+    generatedCaptionUrls.forEach(u=>{try{URL.revokeObjectURL(u)}catch{}});generatedCaptionUrls=[];
+  }
+  function clearSidecarTracks(){
+    sidecarTracks.forEach(t=>{try{URL.revokeObjectURL(t.src)}catch{}});sidecarTracks=[];
+    revokeGeneratedTrackUrls();
+    video.querySelectorAll('track[data-sidecar="true"],track[data-generated-caption="true"]').forEach(t=>t.remove());
+  }
+
+  function resetAlternateAudio(revokeCached=false){
+    alternateAudio.pause();
+    alternateAudio.removeAttribute('src');
+    alternateAudio.load();
+    if(revokeCached){
+      const oldItem=currentItem();
+      if(oldItem?.trackInfo){
+        [...(oldItem.trackInfo.audio||[]),...(oldItem.trackInfo.subtitles||[])].forEach(t=>{if(t.url){try{URL.revokeObjectURL(t.url)}catch{};delete t.url}});
+      }
+    }
+    if(revokeCached&&alternateAudioUrl){try{URL.revokeObjectURL(alternateAudioUrl)}catch{}}
+    alternateAudioUrl='';alternateAudioIndex=-1;alternateAudioActive=false;video.muted=masterMuted;
+  }
+
+  function loadIndex(index,autoPlay=false){
+    const item=items[index];if(!item)return;
+    resetAlternateAudio(true);
+    clearSidecarTracks();
+    currentIndex=index;trackInfo=null;trackProbeKey=item.id;
+    videoShell.classList.remove('music-mode');musicModeBtn.classList.remove('active');
+    video.src=item.url;video.muted=masterMuted;video.volume=masterVolume;video.load();
+    videoTitle.textContent=item.name;overlayTitle.textContent=item.name;emptyState.style.display='none';videoShell.classList.toggle('audio-only',item.kind==='audio');
+    refreshTrackMenus();renderPlaylist();
+    if(autoPlay){video.play().catch(()=>{})}
+    updateUI(true);
+  }
+
+  function playPause(){
+    if(!video.src){if(items.length)loadIndex(0,true);else{toast('Add local video or audio first');fileInput.click()}return}
+    if(video.paused)video.play().catch(()=>{});else video.pause();
+  }
+  function seek(seconds){if(!video.duration)return;video.currentTime=Math.max(0,Math.min(video.duration,video.currentTime+seconds));}
+  function nextVideo(){if(items.length<=1)return;const n=currentIndex<items.length-1?currentIndex+1:0;loadIndex(n,false);playPause()}
+  function previousVideo(){if(!items.length)return;if(video.currentTime>3){video.currentTime=0;return}const p=currentIndex>0?currentIndex-1:items.length-1;loadIndex(p,false);playPause()}
+
+  function setVolume(v){v=Math.max(0,Math.min(1,v));masterVolume=v;masterMuted=v===0;volumeRange.value=v;savedVolume=v;if(alternateAudioActive){alternateAudio.volume=masterMuted?0:masterVolume;video.muted=true}else{video.volume=masterVolume;video.muted=masterMuted}updateMuteIcon();showVolumeHud()}
+  function wheelVolume(e){if(!rightMouseHeld)return;e.preventDefault();e.stopPropagation();const step=.05;const direction=e.deltaY<0?1:-1;const base=masterMuted?0:masterVolume;setVolume(Math.round(Math.max(0,Math.min(1,base+direction*step))*20)/20);updateUI(true)}
+
+  function setSpeed(s){video.playbackRate=s;$('#speedValue').textContent=s===1?'Normal':`${s}×`;document.querySelectorAll('.speed-choice').forEach(b=>b.classList.toggle('active',Number(b.dataset.speed)===s));closePopups();toast(`Speed: ${s}×`)}
+  function toggleFullscreen(){if(!document.fullscreenElement)videoShell.requestFullscreen?.();else document.exitFullscreen?.()}
+  function toggleTheater(){document.body.classList.toggle('theater');toast(document.body.classList.contains('theater')?'Theater mode on':'Theater mode off')}
+  function toggleMusicMode(){const on=videoShell.classList.toggle('music-mode');musicModeBtn.classList.toggle('active',on);toast(on?'Music mode on':'Music mode off')}
+
+  function closePopups(){document.querySelectorAll('.popup.show').forEach(p=>p.classList.remove('show'))}
+  function positionPopup(popup,anchor){
+    const r=anchor.getBoundingClientRect();
+    popup.style.left='0px';popup.style.top='0px';
+    const rect=popup.getBoundingClientRect();
+    let left=Math.min(window.innerWidth-rect.width-8,Math.max(8,r.right-rect.width));
+    let top=r.top-rect.height-8;
+    if(top<8) top=r.bottom+8;
+    if(top+rect.height>window.innerHeight-8) top=Math.max(8,window.innerHeight-rect.height-8);
+    popup.style.left=`${left}px`;popup.style.top=`${top}px`;
+  }
+  function showPopup(popup,anchor){closePopups();popup.classList.add('show');requestAnimationFrame(()=>positionPopup(popup,anchor))}
+
+  function getAudioTracks(){
+    try{return video.audioTracks||video.webkitAudioTracks||null}catch{return null}
+  }
+  function getCaptionTracks(){return [...video.textTracks].filter(t=>t.kind==='subtitles'||t.kind==='captions'||t.kind==='metadata')}
+
+  function currentItem(){return items[currentIndex]||null}
+  function trackStatusHtml(state='idle',text='Embedded tracks are scanned on demand.') {
+    const cls=state==='ready'?' ready':state==='warn'?' warn':'';
+    return `<div class="track-scan${cls}"><span class="scan-dot"></span><span>${escaped(text)}</span></div>`;
+  }
+  function humanTrackLabel(stream,type,i){
+    const tags=stream.tags||{};
+    const lang=tags.language||tags.LANGUAGE||'';
+    const title=tags.title||tags.handler_name||'';
+    const codec=stream.codec_name||stream.codec_long_name||'';
+    if(title)return title;
+    if(lang)return `${lang}${codec?` · ${codec}`:''}`;
+    return `${type==='audio'?'Audio':'Caption'} ${i+1}${codec?` · ${codec}`:''}`;
+  }
+  function streamTech(stream,type){
+    const bits=[];if(stream.tags?.language)bits.push(stream.tags.language);if(stream.codec_name)bits.push(stream.codec_name.toUpperCase());if(type==='audio'&&stream.channels)bits.push(`${stream.channels}ch`);return bits.join(' · ');
+  }
+
+  async function ensureTrackEngine(){
+    if(ffmpegInstance)return ffmpegInstance;
+    if(ffmpegLoading)return ffmpegLoading;
+    ffmpegLoading=(async()=>{
+      const [{FFmpeg},{fetchFile}]=await Promise.all([
+        import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/index.js'),
+        import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js')
+      ]);
+      const f=new FFmpeg();
+      f.on('log',({message})=>{if(/error|failed|invalid/i.test(message||''))console.debug('[LocalTube Track Engine]',message)});
+      await f.load({
+        coreURL:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
+        wasmURL:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',
+        classWorkerURL:'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js'
+      });
+      ffmpegInstance=f;fetchFileFn=fetchFile;return f;
+    })().catch(err=>{ffmpegLoading=null;throw err});
+    return ffmpegLoading;
+  }
+
+  async function writeCurrentToEngine(item){
+    const ff=await ensureTrackEngine();
+    const key=`media_${item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}`;
+    item.trackEngineName ||= key;
+    try{await ff.deleteFile(item.trackEngineName)}catch{}
+    await ff.writeFile(item.trackEngineName,await fetchFileFn(item.file));
+    return ff;
+  }
+
+  async function probeEmbeddedTracks(item,token){
+    if(!item||token!==trackProbeToken)return;
+    if(item.trackInfo){trackInfo=item.trackInfo;refreshTrackMenus();return;}
+    try{
+      trackInfo={status:'loading',audio:[],subtitles:[],format:{}};refreshTrackMenus();
+      const ff=await writeCurrentToEngine(item);if(token!==trackProbeToken)return;
+      const out=`probe_${item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}.json`;try{await ff.deleteFile(out)}catch{}
+      const rc=await ff.ffprobe(['-v','error','-show_streams','-show_format','-of','json',item.trackEngineName,'-o',out]);
+      if(rc!==0)throw new Error(`ffprobe exited with ${rc}`);
+      const raw=await ff.readFile(out,'utf8');const probe=JSON.parse(raw);
+      trackInfo={status:'ready',audio:(probe.streams||[]).filter(x=>x.codec_type==='audio'),subtitles:(probe.streams||[]).filter(x=>x.codec_type==='subtitle'),format:probe.format||{}};
+      item.trackInfo=trackInfo;refreshTrackMenus();
+    }catch(err){
+      console.warn('Embedded track scan failed',err);trackInfo={status:'error',audio:[],subtitles:[],format:{},error:String(err?.message||err)};item.trackInfo=trackInfo;refreshTrackMenus();
+    }
+  }
+
+  function getNativeAudioTracks(){const aud=getAudioTracks();return aud&&aud.length?[...aud].map((t,i)=>({native:true,index:i,label:t.label||`Audio ${i+1}`,language:t.language||'',enabled:!!t.enabled})):[]}
+
+  async function switchEmbeddedAudio(index){
+    const item=currentItem(),info=trackInfo;if(!item||!info?.audio?.[index])return;
+    const stream=info.audio[index],label=humanTrackLabel(stream,'audio',index),wasPlaying=!video.paused,position=video.currentTime||0;
+    if(info.audio[index].url){activateAlternateAudio(info.audio[index].url,index,wasPlaying,position,label);return;}
+    audioTracksBody.querySelectorAll('.popup-item').forEach(b=>b.classList.add('track-loading'));
+    audioSupportNote.textContent=`Preparing ${label}… this may take a little while for large files.`;
+    try{
+      const ff=await ensureTrackEngine();if(!item.trackEngineName)await writeCurrentToEngine(item);
+      const key=`audio_${item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}_${stream.index}`;try{await ff.deleteFile(`${key}.m4a`)}catch{}
+      const rc=await ff.exec(['-i',item.trackEngineName,'-map',`0:${stream.index}`,'-vn','-c:a','aac','-b:a','160k','-movflags','+faststart',`${key}.m4a`]);
+      if(rc!==0)throw new Error(`Audio extraction exited with ${rc}`);
+      const data=await ff.readFile(`${key}.m4a`);const url=URL.createObjectURL(new Blob([data.buffer],{type:'audio/mp4'}));info.audio[index].url=url;activateAlternateAudio(url,index,wasPlaying,position,label);
+    }catch(err){toast(`Could not load ${label}`);audioSupportNote.textContent=`Could not extract this audio track. ${err?.message||''}`.trim();}
+    finally{refreshTrackMenus()}
+  }
+
+  function activateAlternateAudio(url,index,wasPlaying,position,label){
+    alternateAudio.pause();alternateAudioUrl=url;alternateAudioIndex=index;alternateAudioActive=true;video.muted=true;alternateAudio.src=url;alternateAudio.currentTime=position;alternateAudio.playbackRate=video.playbackRate;alternateAudio.volume=masterMuted?0:masterVolume;
+    alternateAudio.addEventListener('loadedmetadata',()=>{try{alternateAudio.currentTime=video.currentTime||position}catch{}},{once:true});
+    if(wasPlaying)alternateAudio.play().catch(()=>{});refreshTrackMenus();toast(`Audio: ${label}`);
+  }
+
+  function useOriginalAudio(){
+    if(!alternateAudioActive)return;const pos=video.currentTime||0,wasPlaying=!video.paused;resetAlternateAudio();video.currentTime=pos;video.muted=masterMuted;video.volume=masterVolume;if(wasPlaying)video.play().catch(()=>{});refreshTrackMenus();toast('Original audio selected');
+  }
+
+  async function addEmbeddedCaption(index){
+    const item=currentItem(),info=trackInfo;if(!item||!info?.subtitles?.[index])return;
+    const stream=info.subtitles[index],label=humanTrackLabel(stream,'subtitle',index);if(info.subtitles[index].url){showCaptionUrl(info.subtitles[index].url,label);return;}
+    captionTracksBody.querySelectorAll('.popup-item').forEach(b=>b.classList.add('track-loading'));captionFileHint.textContent=`Preparing ${label}…`;
+    try{
+      const ff=await ensureTrackEngine();if(!item.trackEngineName)await writeCurrentToEngine(item);
+      const key=`sub_${item.id.replace(/[^a-zA-Z0-9_-]/g,'_')}_${stream.index}`;try{await ff.deleteFile(`${key}.vtt`)}catch{}
+      const rc=await ff.exec(['-i',item.trackEngineName,'-map',`0:${stream.index}`,'-c:s','webvtt','-f','webvtt',`${key}.vtt`]);
+      if(rc!==0)throw new Error(`Subtitle extraction exited with ${rc}`);
+      const data=await ff.readFile(`${key}.vtt`);const url=URL.createObjectURL(new Blob([data.buffer],{type:'text/vtt'}));info.subtitles[index].url=url;generatedCaptionUrls.push(url);showCaptionUrl(url,label);
+    }catch(err){captionFileHint.textContent=`Could not extract ${label}. ${err?.message||''}`.trim();toast(`Could not load ${label}`)}
+    finally{refreshTrackMenus()}
+  }
+
+  function showCaptionUrl(url,label){
+    let track=[...video.querySelectorAll('track[data-generated-caption="true"]')].find(t=>t.dataset.src===url);
+    if(!track){track=document.createElement('track');track.kind='subtitles';track.label=label;track.srclang='und';track.src=url;track.dataset.generatedCaption='true';track.dataset.src=url;track.default=false;video.appendChild(track);}
+    const tracks=getCaptionTracks();tracks.forEach(t=>t.mode='disabled');const enable=()=>{track.mode='showing';refreshTrackMenus();toast(`Captions: ${label}`)};if(track.readyState===2)enable();else track.addEventListener('load',enable,{once:true});
+  }
+
+  function refreshTrackMenus(){
+    const audBody=audioTracksBody;audBody.innerHTML='';const nativeAud=getNativeAudioTracks();
+    if(nativeAud.length){
+      nativeAud.forEach((t,i)=>{const b=document.createElement('button');b.className=`popup-item${t.enabled?' track-active':''}`;b.innerHTML=`<span class="track-item-left"><span class="track-dot ${t.enabled?'on':''}"></span>${escaped(t.label)}</span><span class="track-tech">${escaped(t.language||'')}</span>`;b.onclick=()=>{const aud=getAudioTracks();if(aud?.[i]){[...aud].forEach(x=>x.enabled=false);aud[i].enabled=true;refreshTrackMenus();toast(`Audio: ${t.label}`)}};audBody.appendChild(b)});
+      audioSupportNote.textContent='Browser-native audio tracks are available for this file.';
+    }else if(trackInfo?.status==='ready'&&trackInfo.audio.length){
+      const orig=document.createElement('button');orig.className=`popup-item${!alternateAudioActive?' track-active':''}`;orig.innerHTML=`<span class="track-item-left"><span class="track-dot ${!alternateAudioActive?'on':''}></span>Original audio</span><span class="track-tech">Embedded</span>`;orig.onclick=useOriginalAudio;audBody.appendChild(orig);
+      trackInfo.audio.forEach((stream,i)=>{const label=humanTrackLabel(stream,'audio',i),active=alternateAudioActive&&alternateAudioIndex===i,b=document.createElement('button');b.className=`popup-item${active?' track-active':''}`;b.innerHTML=`<span class="track-item-left"><span class="track-dot ${active?'on':''}></span>${escaped(label)}</span><span class="track-tech">${escaped(streamTech(stream,'audio'))}</span>`;b.onclick=()=>switchEmbeddedAudio(i);audBody.appendChild(b)});
+      audioSupportNote.textContent=`${trackInfo.audio.length} embedded audio track${trackInfo.audio.length===1?'':'s'} found. Selecting another track prepares a local audio stream in your browser.`;
+    }else if(trackInfo?.status==='loading'){
+      audBody.innerHTML=trackStatusHtml('loading','Scanning the file for embedded audio tracks…');audioSupportNote.textContent='The first scan loads the local Track Engine in your browser (~30 MB). Your media file is processed locally.';
+    }else if(trackInfo?.status==='error'){
+      audBody.innerHTML=`<div class="track-empty">Track scan failed. ${escaped(trackInfo.error||'Unknown error')}</div>`;audioSupportNote.textContent='The normal player still works; embedded track extraction needs browser access to the Track Engine CDN.';
+    }else{
+      audBody.innerHTML=trackStatusHtml('warn','No embedded audio-track information has been scanned yet.');audioSupportNote.textContent='The scan starts automatically after media metadata loads.';
+    }
+
+    captionTracksBody.innerHTML='';const tracks=getCaptionTracks(),showing=tracks.find(t=>t.mode==='showing');
+    const off=document.createElement('button');off.className=`popup-item${!showing?' track-active':''}`;off.innerHTML=`<span class="track-item-left"><span class="track-dot ${!showing?'on':''}"></span>Off</span>`;off.onclick=()=>{tracks.forEach(t=>t.mode='disabled');refreshTrackMenus();toast('Captions off')};captionTracksBody.appendChild(off);
+    tracks.forEach((t,i)=>{const b=document.createElement('button'),active=t.mode==='showing';b.className=`popup-item${active?' track-active':''}`;b.innerHTML=`<span class="track-item-left"><span class="track-dot ${active?'on':''}"></span>${escaped(t.label||t.language||`Caption ${i+1}`)}</span><span class="track-tech">${escaped(t.language||'')}</span>`;b.onclick=()=>{tracks.forEach(x=>x.mode='disabled');t.mode='showing';refreshTrackMenus();toast(`Captions: ${t.label||t.language||`Track ${i+1}`}`)};captionTracksBody.appendChild(b)});
+    if(trackInfo?.status==='ready'&&trackInfo.subtitles.length){
+      trackInfo.subtitles.forEach((stream,i)=>{const label=humanTrackLabel(stream,'subtitle',i),cached=stream.url,active=!!cached&&tracks.some(t=>t.src===cached&&t.mode==='showing'),b=document.createElement('button');b.className=`popup-item${active?' track-active':''}`;b.innerHTML=`<span class="track-item-left"><span class="track-dot ${active?'on':''}"></span>${escaped(label)}</span><span class="track-tech">${escaped(streamTech(stream,'subtitle'))}</span>`;b.onclick=()=>addEmbeddedCaption(i);captionTracksBody.appendChild(b)});
+      captionFileHint.textContent=`${trackInfo.subtitles.length} embedded subtitle track${trackInfo.subtitles.length===1?'':'s'} found. Select one to prepare it as browser captions.`;
+    }else if(trackInfo?.status==='loading'){
+      captionTracksBody.insertAdjacentHTML('beforeend',trackStatusHtml('loading','Scanning for embedded subtitle tracks…'));captionFileHint.textContent='The VTT/SRT sidecar option stays available while the scan runs.';
+    }else if(trackInfo?.status==='error'){
+      captionFileHint.textContent='Embedded subtitle scan failed. You can still add a local VTT/SRT file.';
+    }else{
+      captionFileHint.textContent=tracks.length?'Browser-visible caption tracks are available. You can also add a VTT/SRT sidecar file.':'Opening the menu starts an embedded subtitle scan automatically. You can also add a VTT/SRT sidecar file.';
+    }
+  }
+
+  function srtToVtt(text){
+    const normalized=text.replace(/^\uFEFF/,'').replace(/\r/g,'').trim();
+    const lines=normalized.split('\n');
+    const out=['WEBVTT',''];
+    for(let i=0;i<lines.length;i++){
+      if(/^\d+$/.test(lines[i].trim())&&i+1<lines.length&&lines[i+1].includes('-->')){out.push(lines[i].trim());out.push(lines[++i].replace(/,/g,'.'));while(i+1<lines.length&&lines[i+1].trim()!==''){out.push(lines[++i])}out.push('')}
+    }
+    return out.join('\n');
+  }
+  async function addCaptionFile(file){
+    const raw=await file.text();const isSrt=/\.srt$/i.test(file.name)||file.type==='application/x-subrip';const blob=new Blob([isSrt?srtToVtt(raw):raw],{type:'text/vtt'});const src=URL.createObjectURL(blob);
+    const track=document.createElement('track');track.kind='subtitles';track.label=file.name.replace(/\.(vtt|srt)$/i,'');track.srclang='und';track.src=src;track.dataset.sidecar='true';track.default=false;video.appendChild(track);sidecarTracks.push({src});
+    track.addEventListener('load',()=>{refreshTrackMenus();const tracks=getCaptionTracks();if(tracks.length){tracks.forEach(t=>t.mode='disabled');const newest=tracks[tracks.length-1];newest.mode='showing';refreshTrackMenus();toast(`Captions loaded: ${track.label}`)}});refreshTrackMenus();
+  }
+
+  function updateDetails(){
+    const item=items[currentIndex],body=$('#detailsBody');
+    if(!item){body.innerHTML='<div class="quality-note">No media loaded.</div>';return}
+    body.innerHTML=`<div class="quality-note"><b style="color:#eee">${escaped(item.name)}</b><br><br>Type: ${escaped(item.type||'media')}<br>Kind: ${item.kind==='audio'?'Audio':'Video'}<br>Duration: ${formatTime(video.duration)}<br>File size: ${prettySize(item.size)}<br>Speed: ${video.playbackRate}×<br>Volume: ${Math.round(masterVolume*100)}%</div>`;
+  }
+
+  addBtn.onclick=()=>fileInput.click();dropZone.onclick=()=>fileInput.click();fileInput.onchange=e=>{addFiles(e.target.files);fileInput.value=''};
+  $('#playlistToggle').onclick=()=>sidebar.classList.toggle('collapsed');$('#clearBtn').onclick=clearPlaylist;musicModeBtn.onclick=toggleMusicMode;
+  playBtn.onclick=playPause;centerPlay.onclick=playPause;
+  muteBtn.onclick=()=>{masterMuted=!masterMuted;if(alternateAudioActive){alternateAudio.volume=masterMuted?0:masterVolume;video.muted=true}else{video.muted=masterMuted}updateMuteIcon();showVolumeHud();updateUI(true)};
+  volumeRange.oninput=()=>setVolume(Number(volumeRange.value));
+  $('#backBtn').onclick=()=>{seek(-10);showGesture('left');updateUI(true)};$('#forwardBtn').onclick=()=>{seek(10);showGesture('right');updateUI(true)};
+  settingsBtn.onclick=e=>showPopup(settingsPopup,e.currentTarget);$('#speedItem').onclick=e=>showPopup(speedPopup,e.currentTarget);$('#speedBack').onclick=e=>showPopup(settingsPopup,settingsBtn);$('#qualityItem').onclick=e=>showPopup(qualityPopup,e.currentTarget);$('#qualityBack').onclick=e=>showPopup(settingsPopup,settingsBtn);
+  document.querySelectorAll('.speed-choice').forEach(b=>b.onclick=()=>setSpeed(Number(b.dataset.speed)));
+  $('#loopSwitch').onclick=e=>{loop=!loop;e.currentTarget.classList.toggle('on',loop);toast(`Loop ${loop?'on':'off'}`)};
+  audioBtn.onclick=e=>{if(currentItem()&&(!trackInfo||trackInfo.status==='error')){const token=++trackProbeToken;probeEmbeddedTracks(currentItem(),token).catch(()=>{})}refreshTrackMenus();showPopup(audioPopup,e.currentTarget)};captionsBtn.onclick=e=>{if(currentItem()&&(!trackInfo||trackInfo.status==='error')){const token=++trackProbeToken;probeEmbeddedTracks(currentItem(),token).catch(()=>{})}refreshTrackMenus();showPopup(captionsPopup,e.currentTarget)};$('#addCaptionBtn').onclick=()=>{closePopups();captionFileInput.click()};captionFileInput.onchange=async e=>{const f=e.target.files?.[0];if(f)try{await addCaptionFile(f)}catch{toast('Could not load subtitle file')}e.target.value=''};
+  $('#pipBtn').onclick=async()=>{try{if(document.pictureInPictureElement)await document.exitPictureInPicture();else if(document.pictureInPictureEnabled)await video.requestPictureInPicture();else toast('Picture-in-picture is not supported here')}catch{toast('Picture-in-picture unavailable')}};$('#theaterBtn').onclick=toggleTheater;$('#fullscreenBtn').onclick=toggleFullscreen;
+  $('#detailsBtn').onclick=e=>{updateDetails();showPopup($('#detailsPopup'),e.currentTarget)};$('#shortcutsBtn').onclick=e=>showPopup($('#shortcutsPopup'),e.currentTarget);
+
+  function progressLoop(){updateProgress();progressRAF=requestAnimationFrame(progressLoop)}
+  function startProgressLoop(){if(!progressRAF)progressRAF=requestAnimationFrame(progressLoop)}
+  function stopProgressLoop(){if(progressRAF){cancelAnimationFrame(progressRAF);progressRAF=0}updateProgress()}
+  video.addEventListener('play',()=>{setPlayIcon();updateUI();saveMediaPosition();startProgressLoop();if(alternateAudioActive){alternateAudio.currentTime=video.currentTime||0;alternateAudio.playbackRate=video.playbackRate;alternateAudio.volume=masterMuted?0:masterVolume;alternateAudio.play().catch(()=>{})}});
+  video.addEventListener('pause',()=>{setPlayIcon();updateUI(true);saveMediaPosition();stopProgressLoop();if(alternateAudioActive)alternateAudio.pause()});
+  video.addEventListener('loadedmetadata',()=>{mediaEnterTime=Date.now();if(currentIndex>=0){items[currentIndex].duration=video.duration;renderPlaylist();const token=++trackProbeToken;probeEmbeddedTracks(items[currentIndex],token).catch(()=>{})}updateProgress();updateDetails();refreshTrackMenus();setPlayIcon();updateMuteIcon()});
+  video.addEventListener('timeupdate',()=>{updateProgress();if(alternateAudioActive){try{if(Math.abs((alternateAudio.currentTime||0)-(video.currentTime||0))>.22)alternateAudio.currentTime=video.currentTime||0}catch{}}});video.addEventListener('progress',updateProgress);
+  video.addEventListener('seeking',()=>{if(alternateAudioActive)try{alternateAudio.currentTime=video.currentTime}catch{}});
+  video.addEventListener('seeked',()=>{if(alternateAudioActive)try{alternateAudio.currentTime=video.currentTime}catch{}});
+  video.addEventListener('ratechange',()=>{if(alternateAudioActive)alternateAudio.playbackRate=video.playbackRate});video.addEventListener('volumechange',()=>{volumeRange.value=video.volume;updateMuteIcon();updateDetails()});
+  video.addEventListener('ended',()=>{if(alternateAudioActive)alternateAudio.pause();if(loop){video.currentTime=0;video.play().catch(()=>{})}else setPlayIcon()});
+  videoShell.addEventListener('pointermove',()=>updateUI());
+  videoShell.addEventListener('pointerenter',()=>{videoShell.classList.remove('ui-hidden');videoShell.classList.add('show-title');updateUI()});
+  videoShell.addEventListener('pointerleave',()=>{clearTimeout(uiTimer);if(!video.paused){videoShell.classList.add('ui-hidden');videoShell.classList.remove('show-title')}});
+  videoShell.addEventListener('contextmenu',e=>e.preventDefault());
+  videoShell.addEventListener('mousedown',e=>{if(e.button===2){rightMouseHeld=true;videoShell.classList.add('right-mouse');clearTimeout(rightWheelBlockTimer);rightWheelBlockTimer=setTimeout(()=>{rightMouseHeld=false;videoShell.classList.remove('right-mouse')},5000)}});
+  window.addEventListener('mouseup',e=>{if(e.button===2){rightMouseHeld=false;videoShell.classList.remove('right-mouse')}});
+  videoShell.addEventListener('mouseleave',()=>{rightMouseHeld=false;videoShell.classList.remove('right-mouse')});
+  videoShell.addEventListener('wheel',wheelVolume,{passive:false});
+  video.addEventListener('click',e=>{if(e.button===0)playPause()});video.addEventListener('dblclick',toggleFullscreen);
+
+  progressRow.addEventListener('pointerdown',e=>{isProgressDragging=true;progressRow.classList.add('dragging');progressRow.setPointerCapture(e.pointerId);const r=progressTrack.getBoundingClientRect();const ratio=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));if(video.duration)video.currentTime=ratio*video.duration});
+  progressRow.addEventListener('pointermove',e=>{if(!isProgressDragging)return;const r=progressTrack.getBoundingClientRect();const ratio=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));if(video.duration)video.currentTime=ratio*video.duration});
+  progressRow.addEventListener('pointerup',e=>{isProgressDragging=false;progressRow.classList.remove('dragging');try{progressRow.releasePointerCapture(e.pointerId)}catch{}});
+
+  function allowDrop(e){e.preventDefault();dropOverlay.classList.add('show')}
+  document.addEventListener('dragenter',allowDrop);document.addEventListener('dragover',allowDrop);document.addEventListener('dragleave',e=>{if(e.target===dropOverlay)dropOverlay.classList.remove('show')});document.addEventListener('drop',e=>{e.preventDefault();dropOverlay.classList.remove('show');if(e.dataTransfer.files?.length)addFiles(e.dataTransfer.files)});
+  document.addEventListener('pointerdown',e=>{if(!e.target.closest('.popup')&&!e.target.closest('#settingsBtn')&&!e.target.closest('#audioBtn')&&!e.target.closest('#captionsBtn')&&!e.target.closest('#detailsBtn')&&!e.target.closest('#shortcutsBtn')&&!e.target.closest('#speedItem')&&!e.target.closest('#qualityItem'))closePopups()});
+  window.addEventListener('resize',()=>{const open=document.querySelector('.popup.show');if(open){const anchorMap={settingsPopup:settingsBtn,audioPopup:audioBtn,captionsPopup:captionsBtn,detailsPopup:$('#detailsBtn'),shortcutsPopup:$('#shortcutsBtn'),speedPopup:$('#speedItem'),qualityPopup:$('#qualityItem')};const a=anchorMap[open.id];if(a)positionPopup(open,a)}});
+
+  document.addEventListener('keydown',e=>{
+    if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
+    const k=e.key.toLowerCase();
+    if(k===' '||k==='k'){e.preventDefault();playPause()}
+    else if(k==='j'){e.preventDefault();seek(-10);showGesture('left')}
+    else if(k==='l'){e.preventDefault();seek(10);showGesture('right')}
+    else if(k==='arrowleft'){e.preventDefault();seek(-5)}
+    else if(k==='arrowright'){e.preventDefault();seek(5)}
+    else if(k==='arrowup'){e.preventDefault();setVolume(video.volume+.05)}
+    else if(k==='arrowdown'){e.preventDefault();setVolume(video.volume-.05)}
+    else if(k==='m'){video.muted=!video.muted;updateMuteIcon();showVolumeHud()}
+    else if(k==='f'){toggleFullscreen()}
+    else if(k==='p'){$('#pipBtn').click()}
+    else if(k==='n'){nextVideo()}
+    else if(k==='b'){previousVideo()}
+    else if(k==='home'){video.currentTime=0}
+    else if(k==='end'&&video.duration){video.currentTime=video.duration}
+    else if(e.key==='>'){setSpeed(Math.min(2,Math.round((video.playbackRate+.25)*100)/100))}
+    else if(e.key==='<'){setSpeed(Math.max(.5,Math.round((video.playbackRate-.25)*100)/100))}
+    else return;
+    updateUI(true);
+  });
+
+  function saveMediaPosition(){
+    if(!items[currentIndex]||!video.src)return;
+    try{localStorage.setItem('localtube:last',JSON.stringify({name:items[currentIndex].name,time:video.currentTime,volume:masterVolume}))}catch{}
+  }
+  try{savedVolume=Number(localStorage.getItem('localtube:volume'));if(!Number.isFinite(savedVolume))savedVolume=1}catch{savedVolume=1}
+  masterVolume=savedVolume;masterMuted=savedVolume===0;
+
+  miniVideo.volume=0;$('#miniClose').onclick=()=>{miniPlayer.classList.remove('show');miniMode=false};
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden&&video.src&&!video.paused&&!document.pictureInPictureElement&&!miniMode){miniVideo.src=video.src;miniVideo.currentTime=video.currentTime;miniVideo.play().catch(()=>{});miniPlayer.classList.add('show');miniMode=true}
+  });
+  miniVideo.onclick=()=>{if(miniMode){video.currentTime=miniVideo.currentTime;video.play().catch(()=>{});miniPlayer.classList.remove('show');miniMode=false;window.focus()}};
+
+  // Initial state
+  volumeRange.value=savedVolume;video.volume=masterVolume;video.muted=masterMuted;setPlayIcon();updateMuteIcon();updateProgress();refreshTrackMenus();updateCount();
+})();
+</script>
+</body>
+</html>
